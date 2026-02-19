@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "frontend/package.json", "use": "@vercel/static" },
+    { "src": "api/index.js", "use": "@vercel/node" }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/index.js" },
+    { "src": "/(.*)", "dest": "/frontend/build/index.html" }
+  ],
+  "env": {
+    "WEBFLOW_API_TOKEN": "@webflow-api-token",
+    "WEBFLOW_COLLECTION_ID": "@webflow-collection-id"
+  }
+}
