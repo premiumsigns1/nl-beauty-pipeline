@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 import urllib.parse
+from pytrends.request import TrendReq
 
 app = FastAPI(title="Premium Signs SEO Pipeline")
 
@@ -12,11 +13,9 @@ app = FastAPI(title="Premium Signs SEO Pipeline")
 WP_USERNAME = os.getenv("WP_USERNAME", "nick")
 WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD", "")
 WP_SITE_URL = os.getenv("WP_SITE_URL", "https://premiumsigns.co.uk")
-CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
-VALUESERP_API_KEY = os.getenv("VALUESERP_API_KEY", "")
+MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "")
 
 WP_API_URL = f"{WP_SITE_URL}/wp-json/wp/v2"
-AUTH = (WP_USERNAME, WP_APP_PASSWORD)
 
 class KeywordRequest(BaseModel):
     topic: str
@@ -33,12 +32,6 @@ class PreviewRequest(BaseModel):
 
 class PublishRequest(BaseModel):
     post_id: int
-
-def get_wp_headers():
-    return {
-        "Authorization": f"Basic {requests.auth.HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD).encode().decode()}",
-        "Content-Type": "application/json"
-    }
 
 @app.get("/")
 def root():
@@ -67,50 +60,69 @@ def list_posts(per_page: int = 20):
 
 @app.post("/keywords")
 def discover_keywords(req: KeywordRequest):
-    """Discover keyword opportunities from seed topic"""
-    if not VALUESERP_API_KEY:
-        raise HTTPException(status_code=500, detail="VALUESERP_API_KEY not configured")
-    
-    # Use ValueSERP API
-    serp_url = "https://api.valueserp.com/search"
-    params = {
-        "api_key": VALUESERP_API_KEY,
-        "q": req.topic,
-        "num": 50
-    }
-    
+    """Discover keyword opportunities using Google Trends"""
     try:
-        response = requests.get(serp_url, params=params, timeout=30)
-        response.raise_for_status()
-        data = response.json()
+        pytrends = TrendReq(hl='en-GB', tz=0)
+        pytrends.build_payload([req.topic], cat=0, timeframe='today 12-m')
+        
+        # Get related queries
+        related_queries = pytrends.related_queries()
         
         keywords = []
         seen = set()
         
-        if "organic_results" in data:
-            for result in data["organic_results"]:
-                title = result.get("title", "")
-                snippet = result.get("snippet", "")
-                
-                # Extract potential keywords from titles
-                if title and title not in seen:
-                    keywords.append({
-                        "keyword": title[:200],
-                        "url": result.get("link", ""),
-                        "snippet": snippet[:300] if snippet else ""
-                    })
-                    seen.add(title)
+        if req.topic in related_queries:
+            # Top queries
+            top = related_queries[req.topic].get('top')
+            if top is not None:
+                for row in top.head(20).itertuples():
+                    query = row.query
+                    if query and query not in seen:
+                        keywords.append({
+                            "keyword": query,
+                            "url": f"https://www.google.com/search?q={urllib.parse.quote(query)}",
+                            "snippet": f"Trending search related to {req.topic}"
+                        })
+                        seen.add(query)
+            
+            # Rising queries
+            rising = related_queries[req.topic].get('rising')
+            if rising is not None:
+                for row in rising.head(10).itertuples():
+                    query = row.query
+                    if query and query not in seen:
+                        keywords.append({
+                            "keyword": query,
+                            "url": f"https://www.google.com/search?q={urllib.parse.quote(query)}",
+                            "snippet": f"Rising trend related to {req.topic}"
+                        })
+                        seen.add(query)
+        
+        # If no trends data, use the topic itself and variations
+        if not keywords:
+            keywords = [
+                {"keyword": f"{req.topic} UK", "url": f"https://www.google.com/search?q={urllib.parse.quote(req.topic + ' UK')}", "snippet": "UK-focused search"},
+                {"keyword": f"best {req.topic}", "url": f"https://www.google.com/search?q={urllib.parse.quote('best ' + req.topic)}", "snippet": "Best of searches"},
+                {"keyword": f"{req.topic} near me", "url": f"https://www.google.com/search?q={urllib.parse.quote(req.topic + ' near me')}", "snippet": "Local search intent"},
+            ]
         
         return {"keywords": keywords[:20], "topic": req.topic}
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Keyword discovery failed: {str(e)}")
+        # Fallback to basic keywords if trends fails
+        keywords = [
+            {"keyword": f"{req.topic} UK", "url": f"https://www.google.com/search?q={urllib.parse.quote(req.topic + ' UK')}", "snippet": "UK-focused search"},
+            {"keyword": f"best {req.topic}", "url": f"https://www.google.com/search?q={urllib.parse.quote('best ' + req.topic)}", "snippet": "Best of searches"},
+            {"keyword": f"{req.topic} prices", "url": f"https://www.google.com/search?q={urllib.parse.quote(req.topic + ' prices')}", "snippet": "Price search intent"},
+            {"keyword": f"buy {req.topic}", "url": f"https://www.google.com/search?q={urllib.parse.quote('buy ' + req.topic)}", "snippet": "Purchase intent"},
+        ]
+        return {"keywords": keywords, "topic": req.topic}
 
 @app.post("/generate")
 def generate_article(req: GenerateRequest):
-    """Generate SEO-optimized article using Claude"""
-    if not CLAUDE_API_KEY:
-        raise HTTPException(status_code=500, detail="CLAUDE_API_KEY not configured")
+    """Generate SEO-optimized article using Minimax"""
+    if not MINIMAX_API_KEY:
+        raise HTTPException(status_code=500, detail="MINIMAX_API_KEY not configured")
     
     # Get existing posts for internal linking
     posts_response = requests.get(
@@ -125,7 +137,7 @@ def generate_article(req: GenerateRequest):
         for p in existing_posts[:10]
     ])
     
-    # Generate content with Claude
+    # Generate content with Minimax
     prompt = f"""Generate a SEO-optimized article for the keyword: {req.keyword}
 
 Instructions:
@@ -142,32 +154,30 @@ Relevant existing pages on the site for internal linking:
 Generate the article now. Output ONLY valid JSON, no markdown formatting."""
 
     try:
-        claude_response = requests.post(
-            "https://api.anthropic.com/v1/messages",
+        minimax_response = requests.post(
+            "https://api.minimax.chat/v1/text/chatcompletion_pro",
             headers={
-                "x-api-key": CLAUDE_API_KEY,
-                "anthropic-version": "2023-06-01",
+                "Authorization": f"Bearer {MINIMAX_API_KEY}",
                 "Content-Type": "application/json"
             },
             json={
-                "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": 4000,
-                "messages": [{"role": "user", "content": prompt}]
+                "model": "MiniMax-Text-01",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 4000
             },
             timeout=120
         )
         
-        if claude_response.status_code != 200:
-            raise Exception(f"Claude API error: {claude_response.text}")
+        if minimax_response.status_code != 200:
+            raise Exception(f"Minimax API error: {minimax_response.text}")
         
-        result = claude_response.json()
-        content = result["content"][0]["text"]
+        result = minimax_response.json()
+        content = result["choices"][0]["message"]["content"]
         
         # Parse JSON from response
         try:
             article = json.loads(content)
         except:
-            # Try to extract JSON from response
             import re
             json_match = re.search(r'\{[\s\S]*\}', content)
             if json_match:
