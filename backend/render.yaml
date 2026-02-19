@@ -1,0 +1,10 @@
+{
+  "name": "premiumsigns-seo-backend",
+  "build": {
+    "command": "pip install -r requirements.txt",
+    "builder": "python"
+  },
+  "run": {
+    "command": "python main.py"
+  }
+}
