@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NL Beauty SEO Pipeline</title>
+    <style>
+        :root {
+            --bg-primary: #faf7f5;
+            --bg-secondary: #ffffff;
+            --accent-primary: #d4a574;
+            --accent-secondary: #c48b6f;
+            --text-primary: #2d2926;
+            --text-secondary: #6b6560;
+            --border-color: #e8e4e1;
+            --success: #7cb87c;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; line-height: 1.6; }
+        h1, h2 { font-family: Georgia, serif; font-weight: 500; }
+        
+        .container { max-width: 900px; margin: 0 auto; padding: 2rem; }
+        .header { padding: 2rem 0; border-bottom: 1px solid var(--border-color); margin-bottom: 2rem; }
+        .logo { font-size: 1.75rem; }
+        .logo span { color: var(--accent-primary); font-style: italic; }
+        
+        .card { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 2px 12px rgba(0,0,0,0.04); }
+        .btn { padding: 0.75rem 1.5rem; font-size: 0.95rem; font-weight: 500; border: none; border-radius: 10px; cursor: pointer; background: var(--accent-primary); color: white; }
+        .btn:hover { opacity: 0.9; }
+        .btn-small { padding: 0.5rem 1rem; font-size: 0.85rem; background: var(--bg-primary); color: var(--accent-primary); border: 1px solid var(--accent-primary); }
+        
+        .form-group { margin-bottom: 1rem; }
+        label { display: block; font-weight: 500; margin-bottom: 0.5rem; color: var(--text-secondary); }
+        input, textarea { width: 100%; padding: 0.75rem; font-size: 1rem; background: var(--bg-primary); border: 2px solid var(--border-color); border-radius: 8px; font-family: inherit; }
+        input:focus, textarea:focus { outline: none; border-color: var(--accent-primary); }
+        
+        .status { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+        .status-success { background: rgba(124, 184, 124, 0.15); color: #5a905a; }
+        .status-error { background: rgba(212, 124, 124, 0.15); color: #b05555; }
+        
+        .keyword-card { border: 1px solid var(--border-color); border-radius: 10px; padding: 1rem; margin-bottom: 0.75rem; cursor: pointer; }
+        .keyword-card:hover { border-color: var(--accent-primary); }
+        .keyword-card.selected { border-color: var(--accent-primary); background: rgba(212, 165, 116, 0.05); }
+        
+        .article-list { border: 1px solid var(--border-color); border-radius: 10px; padding: 1rem; margin-bottom: 0.5rem; cursor: pointer; }
+        .article-list:hover { border-color: var(--accent-primary); }
+        
+        .badge { display: inline-block; padding: 0.3rem 0.6rem; border-radius: 20px; font-size: 0.75rem; font-weight: 500; }
+        .badge-draft { background: rgba(212, 165, 116, 0.15); color: var(--accent-secondary); }
+        .badge-published { background: rgba(124, 184, 124, 0.15); color: var(--success); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1 class="logo">NL <span>Beauty Pipeline</span></h1>
+        </header>
+        
+        <div id="status"></div>
+        
+        <div class="card">
+            <h2>Discover Keywords</h2>
+            <div class="form-group">
+                <label>Enter a seed topic</label>
+                <input type="text" id="topic" placeholder="e.g., skincare, best moisturiser...">
+            </div>
+            <button class="btn" onclick="discoverKeywords()">Discover Keywords</button>
+        </div>
+        
+        <div id="keywords-section" style="display:none">
+            <div class="card">
+                <h2>Keyword Opportunities</h2>
+                <div id="keywords-list"></div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Articles</h2>
+            <button class="btn btn-small" onclick="loadArticles()">Refresh</button>
+            <div id="articles-list" style="margin-top:1rem"></div>
+        </div>
+        
+        <div id="article-section" style="display:none">
+            <div class="card">
+                <h2 id="article-title"></h2>
+                <span id="article-status" class="badge badge-draft"></span>
+                <div style="margin-top:1rem">
+                    <div class="form-group">
+                        <label>Title</label>
+                        <input type="text" id="edit-title">
+                    </div>
+                    <div class="form-group">
+                        <label>Content</label>
+                        <textarea id="edit-content" rows="15"></textarea>
+                    </div>
+                    <button class="btn" onclick="publishArticle()">Publish to Webflow</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const API = '';
+        let currentArticle = null;
+        
+        function showStatus(msg, type) {
+            document.getElementById('status').innerHTML = '<div class="status status-' + type + '">' + msg + '</div>';
+        }
+        
+        async function discoverKeywords() {
+            const topic = document.getElementById('topic').value;
+            if (!topic) return;
+            
+            showStatus('Discovering keywords...', 'success');
+            
+            try {
+                const res = await fetch('/api/keywords', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({topic})
+                });
+                const data = await res.json();
+                
+                const list = document.getElementById('keywords-list');
+                list.innerHTML = data.keywords.map(kw => 
+                    '<div class="keyword-card" onclick="requestArticle(\'' + kw.keyword + '\')">' +
+                    '<strong>' + kw.keyword + '</strong><br><small>' + kw.snippet + '</small>' +
+                    '</div>'
+                ).join('');
+                
+                document.getElementById('keywords-section').style.display = 'block';
+                showStatus('Found ' + data.keywords.length + ' keywords!', 'success');
+            } catch(e) {
+                showStatus('Error: ' + e.message, 'error');
+            }
+        }
+        
+        function requestArticle(keyword) {
+            showStatus('Article requested for: ' + keyword + '. Check the group chat to approve.', 'success');
+        }
+        
+        async function loadArticles() {
+            try {
+                const res = await fetch('/api/articles');
+                const data = await res.json();
+                
+                const list = document.getElementById('articles-list');
+                if (data.articles.length === 0) {
+                    list.innerHTML = '<p>No articles yet.</p>';
+                    return;
+                }
+                
+                list.innerHTML = data.articles.map(a => 
+                    '<div class="article-list" onclick="loadArticle(\'' + a.id + '\')">' +
+                    '<strong>' + a.title + '</strong> <span class="badge badge-' + a.status + '">' + a.status + '</span>' +
+                    '</div>'
+                ).join('');
+            } catch(e) {
+                showStatus('Error loading articles: ' + e.message, 'error');
+            }
+        }
+        
+        async function loadArticle(id) {
+            try {
+                const res = await fetch('/api/article/' + id);
+                currentArticle = await res.json();
+                
+                document.getElementById('article-title').textContent = currentArticle.title;
+                document.getElementById('edit-title').value = currentArticle.title;
+                document.getElementById('edit-content').value = currentArticle.content;
+                document.getElementById('article-status').textContent = currentArticle.status;
+                document.getElementById('article-section').style.display = 'block';
+            } catch(e) {
+                showStatus('Error: ' + e.message, 'error');
+            }
+        }
+        
+        async function publishArticle() {
+            if (!currentArticle) return;
+            
+            showStatus('Publishing...', 'success');
+            
+            try {
+                const res = await fetch('/api/publish', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({article_id: currentArticle.id})
+                });
+                const data = await res.json();
+                
+                if (data.error) throw new Error(data.error);
+                
+                showStatus('Published! URL: ' + data.webflow_item_id, 'success');
+            } catch(e) {
+                showStatus('Publish error: ' + e.message, 'error');
+            }
+        }
+        
+        loadArticles();
+    </script>
+</body>
+</html>
